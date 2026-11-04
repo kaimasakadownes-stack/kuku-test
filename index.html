@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif; background: #e6f0fa; color: #14243b; margin: 0; padding: 20px; }
+  .box { max-width: 560px; margin: 0 auto; background: #fff; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 16px; text-align: center; }
+  h1 { font-size: 22px; margin: 0; }
+  .q { font-size: 72px; font-weight: 900; margin: 0; }
+  .mic { width: 110px; height: 110px; border-radius: 50%; border: 0; background: #d43f2b; color: #fff; font-size: 18px; font-weight: 900; margin: 0 auto; }
+  .mic.on { background: #23784a; }
+  .judge { font-size: 64px; font-weight: 900; min-height: 80px; }
+  .ok { color: #23784a; } .ng { color: #b8321f; }
+  .heard { font-size: 18px; min-height: 28px; }
+  .small { font-size: 14px; color: #4c5c73; text-align: left; background: #f2f6fb; border-radius: 10px; padding: 12px; line-height: 1.7; }
+  button.sub { border: 2px solid #c6d3e4; background: #f2f6fb; border-radius: 12px; padding: 10px 16px; font-size: 16px; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>マイクテスト</h1>
+  <p class="q" id="q">5 × 3</p>
+  <button class="mic" id="mic">おして<br>こたえる</button>
+  <div class="judge" id="judge"></div>
+  <div class="heard" id="heard">ボタンを おして こたえを いってね</div>
+  <button class="sub" id="next">つぎの もんだい</button>
+  <div class="small" id="info">しらべています…</div>
+</div>
+
+<script>
+  var qs = [[5,3],[2,7],[3,8],[4,6],[9,9],[7,8],[6,4],[8,7]];
+  var qi = 0;
+  var info = document.getElementById('info');
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var lines = [];
+  lines.push('こえの聞きとり: ' + (SR ? 'つかえる(対応あり)' : 'つかえない(このブラウザは非対応)'));
+  lines.push('安全な接続(https): ' + (window.isSecureContext ? 'はい' : 'いいえ'));
+  lines.push('マイクの許可: まだ ためしていません');
+  lines.push('ブラウザ: ' + navigator.userAgent);
+  function showInfo() { info.innerHTML = lines.join('<br>'); }
+  showInfo();
+
+  function kanjiNum(s) {
+    var D = {'〇':0,'零':0,'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};
+    if (s.indexOf('十') >= 0) {
+      var p = s.split('十');
+      return (p[0] ? D[p[0].slice(-1)] : 1) * 10 + (p[1] ? (D[p[1][0]] || 0) : 0);
+    }
+    var n = 0; for (var i = 0; i < s.length; i++) n = n * 10 + D[s[i]]; return n;
+  }
+  function lastNumber(t) {
+    t = t.replace(/[０-９]/g, function(c){ return String.fromCharCode(c.charCodeAt(0) - 65248); });
+    var m = t.match(/[0-9]+|[〇零一二三四五六七八九十]+/g);
+    if (!m) return null;
+    var x = m[m.length - 1];
+    return /[0-9]/.test(x) ? parseInt(x, 10) : kanjiNum(x);
+  }
+
+  document.getElementById('next').onclick = function () {
+    qi = (qi + 1) % qs.length;
+    document.getElementById('q').textContent = qs[qi][0] + ' × ' + qs[qi][1];
+    document.getElementById('judge').textContent = '';
+    document.getElementById('heard').textContent = 'ボタンを おして こたえを いってね';
+  };
+
+  document.getElementById('mic').onclick = function () {
+    var btn = this;
+    if (!SR) { document.getElementById('heard').textContent = 'このブラウザでは こえの聞きとりが つかえません'; return; }
+    var rec = new SR();
+    rec.lang = 'ja-JP';
+    rec.interimResults = false;
+    rec.maxAlternatives = 3;
+    btn.classList.add('on');
+    document.getElementById('heard').textContent = 'きいているよ…';
+    rec.onresult = function (e) {
+      var ans = qs[qi][0] * qs[qi][1];
+      var ok = false, heard = e.results[0][0].transcript;
+      for (var i = 0; i < e.results[0].length; i++) {
+        var t = e.results[0][i].transcript.replace(/\s/g, '');
+        if (lastNumber(t) === ans) { ok = true; heard = e.results[0][i].transcript; break; }
+      }
+      var j = document.getElementById('judge');
+      j.textContent = ok ? '〇' : '×';
+      j.className = 'judge ' + (ok ? 'ok' : 'ng');
+      document.getElementById('heard').textContent = 'きこえた ことば:「' + heard + '」 こたえは ' + ans;
+      lines[2] = 'マイクの許可: OK(聞きとりできました)'; showInfo();
+    };
+    rec.onerror = function (e) {
+      document.getElementById('heard').textContent = 'エラー: ' + e.error;
+      lines[2] = 'マイクの許可: エラー(' + e.error + ')'; showInfo();
+    };
+    rec.onend = function () { btn.classList.remove('on'); };
+    try { rec.start(); } catch (err) {
+      btn.classList.remove('on');
+      document.getElementById('heard').textContent = 'はじめられませんでした: ' + err.message;
+    }
+  };
+</script>
+</body>
+</html>
