@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>九九マウンテン いっきに言うテスト</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif; background: #e6f0fa; color: #14243b; margin: 0; padding: 16px; }
+  .box { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 22px; margin: 0; text-align: center; }
+  .label { font-size: 14px; font-weight: 700; color: #4c5c73; margin-bottom: 6px; }
+  .pick { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pick button { min-width: 56px; min-height: 52px; border-radius: 14px; border: 3px solid #c6d3e4; background: #f2f6fb; font-size: 22px; font-weight: 900; color: #14243b; font-family: inherit; }
+  .pick.mode button { font-size: 18px; padding: 0 16px; }
+  .pick button.on { border-color: #1a3555; background: #1a3555; color: #fff; }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .c { border-radius: 14px; background: #f2f6fb; border: 3px solid #c6d3e4; padding: 10px 6px; text-align: center; transition: background .2s, border-color .2s; }
+  .c .e { font-size: 26px; font-weight: 900; }
+  .c .a { font-size: 18px; font-weight: 900; color: transparent; min-height: 26px; }
+  .c.ok { background: #e3f4ea; border-color: #23784a; }
+  .c.ok .a { color: #23784a; }
+  .c.miss { background: #fbe6e2; border-color: #b8321f; }
+  .c.miss .a { color: #b8321f; }
+  .clock { font-size: 56px; font-weight: 900; text-align: center; line-height: 1; font-variant-numeric: tabular-nums; }
+  .clock small { font-size: 20px; margin-left: 4px; }
+  .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .big { min-height: 64px; padding: 0 28px; border-radius: 18px; border: 0; font-size: 22px; font-weight: 900; color: #fff; background: #d43f2b; font-family: inherit; }
+  .big.stop { background: #1a3555; }
+  .big:disabled { opacity: .4; }
+  .result { text-align: center; font-size: 26px; font-weight: 900; min-height: 36px; }
+  .result.good { color: #23784a; } .result.bad { color: #b8321f; }
+  .status { text-align: center; font-size: 16px; color: #4c5c73; min-height: 24px; }
+  details { font-size: 14px; color: #4c5c73; background: #f2f6fb; border-radius: 10px; padding: 10px 12px; }
+  details summary { font-weight: 700; cursor: pointer; }
+  #heard { word-break: break-all; margin-top: 6px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>九九を いっきに 言ってみよう</h1>
+
+  <div>
+    <div class="label">だん</div>
+    <div class="pick" id="dans"></div>
+  </div>
+  <div>
+    <div class="label">いいかた</div>
+    <div class="pick mode" id="modes"></div>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="clock" id="clock">0.0<small>びょう</small></div>
+  <div class="result" id="result"></div>
+  <div class="status" id="status">「スタート」を おしたら すぐに 言ってね</div>
+
+  <div class="row">
+    <button class="big" id="start">スタート</button>
+    <button class="big stop" id="stop" disabled>おわり</button>
+  </div>
+
+  <details>
+    <summary>きこえた ことば(先生用)</summary>
+    <div id="heard">—</div>
+  </details>
+</div>
+
+<script>
+  var DANS = [5, 2, 3, 4, 6, 7, 8, 9];
+  var MODES = [{ k: 'nobori', t: '①のぼり' }, { k: 'kudari', t: '②くだり' }, { k: 'bara', t: '③バラバラ' }];
+  // こたえの よみかた(3文字以上のものだけ 判定につかう)
+  var YOMI = {
+    10:'じゅう',12:'じゅうに',14:'じゅうし',15:'じゅうご',16:'じゅうろく',18:'じゅうはち',20:'にじゅう',21:'にじゅういち',
+    24:'にじゅうし',25:'にじゅうご',27:'にじゅうしち',28:'にじゅうはち',30:'さんじゅう',32:'さんじゅうに',35:'さんじゅうご',
+    36:'さんじゅうろく',40:'しじゅう',42:'しじゅうに',45:'しじゅうご',48:'しじゅうはち',49:'しじゅうく',54:'ごじゅうし',
+    56:'ごじゅうろく',63:'ろくじゅうさん',64:'ろくじゅうし',72:'しちじゅうに',81:'はちじゅういち'
+  };
+  var KN = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+  function kanji(n) { var t = Math.floor(n / 10), o = n % 10; return (t ? (t > 1 ? KN[t] : '') + '十' : '') + KN[o]; }
+
+  var dan = 5, mode = 'nobori', order = [];
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var rec = null, running = false, committed = '', session = '', t0 = 0, raf = 0, timeout = 0, doneAt = 0;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function buildPick() {
+    $('dans').innerHTML = ''; $('modes').innerHTML = '';
+    DANS.forEach(function (d) {
+      var b = document.createElement('button'); b.textContent = d; if (d === dan) b.className = 'on';
+      b.onclick = function () { if (running) return; dan = d; buildPick(); setup(); }; $('dans').appendChild(b);
+    });
+    MODES.forEach(function (m) {
+      var b = document.createElement('button'); b.textContent = m.t; if (m.k === mode) b.className = 'on';
+      b.onclick = function () { if (running) return; mode = m.k; buildPick(); setup(); }; $('modes').appendChild(b);
+    });
+  }
+  function setup() {
+    order = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    if (mode === 'kudari') order.reverse();
+    if (mode === 'bara') for (var i = order.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var x = order[i]; order[i] = order[j]; order[j] = x; }
+    $('cards').innerHTML = order.map(function (b, i) {
+      return '<div class="c" id="c' + i + '"><div class="e">' + dan + '×' + b + '</div><div class="a">' + (dan * b) + '</div></div>';
+    }).join('');
+    $('clock').innerHTML = '0.0<small>びょう</small>';
+    $('result').textContent = ''; $('result').className = 'result';
+    $('heard').textContent = '—';
+  }
+
+  // 文字の中から こたえを さがす(cursor より後ろ)
+  function findAns(text, cursor, ans) {
+    var best = null;
+    function consider(idx, len) { if (idx >= 0 && (best === null || idx < best.idx)) best = { idx: idx, len: len }; }
+    // 数字:数字のつながりの 終わりに あるものだけ(「5315」の 15 は OK、「15」の 5 は ×)
+    var s = String(ans), from = cursor;
+    while (true) {
+      var i = text.indexOf(s, from); if (i < 0) break;
+      var rest = text.substr(i + s.length);
+      // うしろが 数字でない、または つぎの しきの だんの数字(「155×4」の 15)なら OK
+      var d = String(dan);
+      if (!/^[0-9]/.test(rest) || (rest.indexOf(d) === 0 && !/^[0-9]/.test(rest.substr(d.length)))) { consider(i, s.length); break; }
+      from = i + 1;
+    }
+    var k = kanji(ans); from = cursor;
+    while (true) {
+      var i2 = text.indexOf(k, from); if (i2 < 0) break;
+      var after2 = text.charAt(i2 + k.length);
+      if (!/[一二三四五六七八九十]/.test(after2)) { consider(i2, k.length); break; }
+      from = i2 + 1;
+    }
+    if (YOMI[ans]) consider(text.indexOf(YOMI[ans], cursor), YOMI[ans].length);
+    return best;
+  }
+
+  function normalize(t) {
+    return t.replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 65248); }).replace(/\s/g, '');
+  }
+
+  function check(final) {
+    var text = normalize(committed + session);
+    $('heard').textContent = text || '—';
+    var cursor = 0, hit = 0;
+    order.forEach(function (b, i) {
+      var f = findAns(text, cursor, dan * b);
+      var el = $('c' + i);
+      if (f) { el.className = 'c ok'; cursor = f.idx + f.len; hit++; }
+      else el.className = final ? 'c miss' : 'c';
+    });
+    return hit;
+  }
+
+  function tick() { $('clock').innerHTML = ((performance.now() - t0) / 1000).toFixed(1) + '<small>びょう</small>'; raf = requestAnimationFrame(tick); }
+
+  function begin() {
+    if (!SR) { $('status').textContent = 'このブラウザでは こえの聞きとりが つかえません'; return; }
+    setup(); committed = ''; session = ''; running = true; doneAt = 0;
+    $('start').disabled = true; $('stop').disabled = false;
+    $('status').textContent = 'きいているよ… どうぞ!';
+    t0 = performance.now(); tick();
+    timeout = setTimeout(function () { finish(); }, 90000);
+    listen();
+  }
+
+  function listen() {
+    rec = new SR();
+    rec.lang = 'ja-JP'; rec.continuous = true; rec.interimResults = true;
+    rec.onresult = function (e) {
+      var s = '';
+      for (var i = 0; i < e.results.length; i++) s += e.results[i][0].transcript;
+      session = s;
+      var hit = check(false);
+      if (hit === 9 && !doneAt) { doneAt = performance.now(); finish(); }
+    };
+    rec.onerror = function (e) {
+      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      $('status').textContent = 'エラー: ' + e.error;
+      finish();
+    };
+    rec.onend = function () {
+      committed += session; session = '';
+      if (running) { try { listen(); } catch (err) {} } // とちゅうで きれたら つづきを きく
+    };
+    try { rec.start(); } catch (err) { $('status').textContent = 'はじめられませんでした: ' + err.message; finish(); }
+  }
+
+  function finish() {
+    if (!running) return;
+    running = false; clearTimeout(timeout); cancelAnimationFrame(raf);
+    var end = doneAt || performance.now();
+    $('clock').innerHTML = ((end - t0) / 1000).toFixed(1) + '<small>びょう</small>';
+    try { rec && rec.stop(); } catch (err) {}
+    var hit = check(true);
+    $('start').disabled = false; $('stop').disabled = true;
+    $('start').textContent = 'もういちど';
+    if (hit === 9) { $('result').textContent = '〇 ぜんぶ 言えた!'; $('result').className = 'result good'; $('status').textContent = 'すごい! おうちの人に 見せよう'; }
+    else { $('result').textContent = '9こ中 ' + hit + 'こ 言えた'; $('result').className = 'result bad'; $('status').textContent = 'あかい ところを れんしゅう しよう'; }
+  }
+
+  $('start').onclick = begin;
+  $('stop').onclick = finish;
+  buildPick(); setup();
+</script>
+</body>
+</html>
